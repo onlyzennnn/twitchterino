@@ -214,11 +214,13 @@ function renderPanel() {
     if (ch.live) live++;
     const tr = el('tr');
     const st = ch.ageGate ? el('span', 'pill age', 'CONFIRMAR +18')
+      : ch.streakVisit ? el('span', 'pill warming', 'SEQUÊNCIA')
       : ch.earning === 'earning' ? el('span', 'pill watching', 'GANHANDO')
       : ch.earning === 'warming' ? el('span', 'pill warming', 'AQUECENDO')
       : ch.earning === 'idle' ? el('span', 'pill stalled', 'SEM PONTOS')
       : ch.live ? el('span', 'pill queue', state.rotation ? 'NA FILA' : 'SEM VAGA') : el('span', 'pill', 'offline');
-    if (ch.earning === 'warming') st.title = 'A Twitch dá +10 a cada 5 min assistidos, e o baú de +50 aparece a cada ~15 min.';
+    if (ch.streakVisit) st.title = 'Visita rápida para pegar a sequência de lives (300 a 450 pts). Em até 10 min a vaga volta para o foco em bônus.';
+    else if (ch.earning === 'warming') st.title = 'A Twitch dá +10 a cada 5 min assistidos, e o baú de +50 aparece a cada ~15 min.';
     if (ch.earning === 'idle') st.title = 'Tocando há mais de 13 min sem o saldo subir. A Twitch pode limitar quantas lives contam ao mesmo tempo.';
     if (ch.live && ch.goalLeft != null && state.rotation) st.title = `${st.title || ''}\nFaltam ${ch.goalLeft} pts para ${ch.goal}`.trim();
     const tdStatus = el('td'); tdStatus.append(st);

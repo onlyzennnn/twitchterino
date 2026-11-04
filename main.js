@@ -49,6 +49,7 @@ const DEFAULT_CONFIG = {
   sleepMode: false,  // "antes de dormir": só aparece para quem ligar
   favorites: [],
   purchases: [],     // bônus comprados: { t, cost, slug } (cronômetro e relatório)
+  streaks: {},       // sequência de lives: { slug: id da live em que a visita já foi feita }
   daily: {},         // pontos ganhos por dia: { 'AAAA-MM-DD': pts }
 };
 let config = { ...DEFAULT_CONFIG };
@@ -528,7 +529,7 @@ function weeklyReport(now = Date.now()) {
 
 // Status da live, saldo, follow e sub numa consulta só. GraphQL interno da Twitch: pode mudar sem aviso.
 const CHANNEL_QUERY = `query($login: String!) { user(login: $login) {
-  displayName stream { viewersCount title }
+  displayName stream { id viewersCount title }
   channel { self { communityPoints { balance } } }
   self { follower { followedAt } subscriptionBenefit { id } }
 } }`;
@@ -548,6 +549,7 @@ async function refreshChannel(slug) {
     if (wasLive === false && s.live && config.favorites.includes(slug)) {
       notify(`★ ${user.displayName || slug} entrou ao vivo`, user.stream.title || 'Clique para abrir o chat.', () => { showMain(); send('select', slug); });
     }
+    s.streamId = user.stream ? user.stream.id : null;
     s.viewers = user.stream ? user.stream.viewersCount : 0;
     s.title = user.stream ? user.stream.title : '';
     s.displayName = user.displayName || slug;
@@ -568,6 +570,7 @@ async function refreshChannel(slug) {
     if (s.points != null && p > s.points) {
       s.gainedTotal = (s.gainedTotal || 0) + (p - s.points);
       if (watchers.has(slug)) s.lastGainAt = Date.now();
+      if (watchers.has(slug) && p - s.points >= 300) markStreak(slug); // a sequência caiu: libera a vaga
       addDaily(p - s.points);
     }
     if (s.points != null && p < s.points) registerPurchases(slug, s.points - p);
@@ -629,7 +632,7 @@ function logHistory() {
     channels[slug] = {
       live: !!s.live, watching: watchers.has(slug), points: s.points ?? null, following: s.following ?? null,
       subscribed: !!s.subscribed, earning: earningState(slug, now), video: s.video || null, visibility: s.visibility || null,
-      gate: !!s.ageGate, pointsWidget: s.pointsWidget ?? null, claims: s.claims ?? null, watchedMin: Math.floor(totalWatched(slug, now) / 60000),
+      gate: !!s.ageGate, pointsWidget: s.pointsWidget ?? null, claims: s.claims ?? null, needsStreak: needsStreak(slug), watchedMin: Math.floor(totalWatched(slug, now) / 60000),
     };
   }
   const line = JSON.stringify({
@@ -652,6 +655,21 @@ function logHistory() {
 const SWITCH_MARGIN = 50;
 const IDLE_COOLDOWN_MS = 30 * 60 * 1000;
 
+// Sequência de lives (watch streak): a Twitch dá 300 a 450 pts por canal a cada live seguida em
+// que você assiste alguns minutos. Como só 2 lives contam por vez, cada canal que entra ao vivo
+// passa na frente de todos até o saldo pular 300+ ou por STREAK_MS; depois o foco volta ao normal.
+const STREAK_MS = 10 * 60 * 1000;
+const needsStreak = (slug) => {
+  const s = status.get(slug) || {};
+  return !!s.live && !!s.streamId && config.streaks[slug] !== s.streamId;
+};
+function markStreak(slug) {
+  const s = status.get(slug);
+  if (!s || !s.streamId) return;
+  config.streaks[slug] = s.streamId;
+  configDirty = true;
+}
+
 function goalRank(points) {
   const p = points || 0;
   // Bônus escolhido: junta pontos até o custo dele; quem já chegou cede a vaga para o próximo canal.
@@ -669,11 +687,13 @@ function goalRank(points) {
 
 const compareGoal = (a, b) => {
   const ra = goalRank(a.points), rb = goalRank(b.points);
-  return !!a.cooling - !!b.cooling || !!b.sub - !!a.sub || ra.tier - rb.tier || ra.left - rb.left;
+  return !!a.cooling - !!b.cooling || !!b.streak - !!a.streak || !!b.sub - !!a.sub || ra.tier - rb.tier || ra.left - rb.left;
 };
 
 function worthSwitching(candidate, current) {
-  if (candidate.cooling || current.sub) return false;
+  if (candidate.cooling || current.streak) return false;
+  if (candidate.streak) return true;
+  if (current.sub) return false;
   if (candidate.sub) return true;
   const c = goalRank(candidate.points), w = goalRank(current.points);
   return c.tier < w.tier || (c.tier === w.tier && c.left + SWITCH_MARGIN < w.left);
@@ -715,11 +735,14 @@ function reconcileWatchers() {
     .sort((a, b) => turnTime(b, now) - turnTime(a, now));
   while (watchers.size > config.maxWatchers && rotatable().length) stopWatcher(rotatable()[0]);
 
+  // Visita da sequência cumprida pelo tempo (quando o saldo pula 300+, refreshChannel já marcou).
+  for (const slug of watchers.keys()) if (needsStreak(slug) && turnTime(slug, now) >= STREAK_MS) markStreak(slug);
+
   // Sem foco, as vagas seguem a ordem da lista de canais e ninguém troca de lugar.
   const focusInfo = (slug) => {
     const s = status.get(slug) || {};
     const cooling = (s.cooldownUntil || 0) > now;
-    return { points: s.points, cooling, sub: !!s.subscribed && !cooling };
+    return { points: s.points, cooling, streak: needsStreak(slug) && !cooling, sub: !!s.subscribed && !cooling };
   };
   const byGoal = (a, b) => compareGoal(focusInfo(a), focusInfo(b));
   const waiting = config.channels.filter((slug) => !watchers.has(slug) && (status.get(slug) || {}).live);
@@ -850,6 +873,7 @@ function snapshot() {
         slug, displayName: s.displayName || slug, live: !!s.live, viewers: s.viewers || 0,
         title: s.title || '', chatroomId: s.chatroomId || null, points: s.points ?? null,
         watching: watchers.has(slug), ageGate: !!s.ageGate, earning: earningState(slug, now),
+        streakVisit: watchers.has(slug) && needsStreak(slug),
         following: s.following ?? null, subscribed: !!s.subscribed,
         gained: s.gainedTotal || 0,
         goal: s.points != null ? goalRank(s.points).goal : null,
