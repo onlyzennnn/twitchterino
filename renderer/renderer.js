@@ -1,4 +1,4 @@
-// Kickterino — interface (abas estilo Chatterino). O chat chega do processo principal,
+// Twitchterino — interface (abas estilo Chatterino). O chat chega do processo principal,
 // que o lê das janelas da live (só canais ao vivo que estão sendo assistidos).
 const MAX_MESSAGES = 400;
 
@@ -99,7 +99,7 @@ function renderTabs() {
     if (favs.has(ch.slug)) t.append(el('span', 'fav-star', '★ '));
     const name = el('span', unread.has(ch.slug) && ch.slug !== active ? 'unread' : '', ch.displayName);
     t.append(name);
-    if (ch.subscribed) { const s = el('span', 'tab-sub', 'SUB'); s.title = 'Você é sub: pontos em dobro'; t.append(s); }
+    if (ch.subscribed) { const s = el('span', 'tab-sub', 'SUB'); s.title = 'Você é sub: pontos extras neste canal'; t.append(s); }
     if (ch.live) t.append(el('span', 'dot'));
     t.title = !ch.live ? 'offline'
       : `AO VIVO · ${ch.viewers} espectadores\n${ch.title}`
@@ -146,7 +146,7 @@ function renderHeader() {
   title.append(el('b', null, ch.displayName), ch.live ? ` · AO VIVO · ${ch.viewers} · ${ch.title}` : ' · offline');
   if (ch.ageGate) {
     const warn = el('button', 'age-gate', '⚠ Canal +18: clique para confirmar a idade');
-    warn.title = 'A Kick pede confirmação de idade antes de tocar esta live. Sem isso, ela não conta pontos.';
+    warn.title = 'A Twitch pede confirmação antes de tocar esta live. Sem isso, ela não conta pontos.';
     warn.onclick = () => window.kick.showChannel(ch.slug);
     title.prepend(warn, ' ');
   }
@@ -164,7 +164,7 @@ function renderHeader() {
 
 // ---------- Teste de limite ----------
 function resultLines(results) {
-  return results.map((r) => `${r.lives} lives → +${r.pts} pts em ${r.minutes} min (≈ ${r.counting} lives contando)`);
+  return results.map((r) => `${r.lives} lives → ${r.counting} ganharam pontos (+${r.pts} pts em ${r.minutes} min)`);
 }
 
 function renderLimitTest() {
@@ -181,23 +181,23 @@ function renderLimitTest() {
   }
   btn.textContent = state.limitResult ? 'Refazer teste de limite' : 'Descobrir limite de lives';
   btn.disabled = !state.loggedIn;
-  btn.title = state.loggedIn ? 'Abre todas as lives ao vivo e mede quantas a Kick conta; se não forem todas, testa números menores (~20 min por etapa) e ajusta o app para o que rende mais pontos' : 'Faça login na Kick para testar';
+  btn.title = state.loggedIn ? 'Abre todas as lives ao vivo e mede quantas a Twitch conta; se não forem todas, testa números menores (~20 min por etapa) e ajusta o app para o que rende mais pontos' : 'Faça login na Twitch para testar';
   const r = state.limitResult;
   if (!r) return;
   info.append(el('div', 'limit-now', `Último teste (${new Date(r.at).toLocaleString('pt-BR')}): usando ${r.chosen} lives`));
   for (const line of resultLines(r.results)) info.append(el('div', null, line));
 }
 
-// Selo de sub: estrela + "SUB ×2" (o sub ganha pontos em dobro no canal).
+// Selo de sub: estrela + "SUB +" (na Twitch o sub ganha pontos extras no canal).
 function subBadge() {
   const b = el('span', 'sub-badge');
-  b.title = 'Você é sub: pontos em dobro aqui. Com o foco ligado, este canal vem primeiro enquanto estiver ao vivo.';
+  b.title = 'Você é sub: pontos extras aqui. Com o foco ligado, este canal vem primeiro enquanto estiver ao vivo.';
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   const star = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   star.setAttribute('d', 'M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3 6.1 20.6l1.3-6.6L2.5 9.4l6.6-.8z');
   svg.append(star);
-  b.append(svg, el('span', null, 'SUB'), el('i', null, '×2'));
+  b.append(svg, el('span', null, 'SUB'), el('i', null, '+'));
   return b;
 }
 
@@ -218,15 +218,15 @@ function renderPanel() {
       : ch.earning === 'warming' ? el('span', 'pill warming', 'AQUECENDO')
       : ch.earning === 'idle' ? el('span', 'pill stalled', 'SEM PONTOS')
       : ch.live ? el('span', 'pill queue', state.rotation ? 'NA FILA' : 'SEM VAGA') : el('span', 'pill', 'offline');
-    if (ch.earning === 'warming') st.title = 'A Kick dá a primeira contagem ~6–7 min depois que a live abre.';
-    if (ch.earning === 'idle') st.title = 'Tocando há mais de 13 min sem o saldo subir. A Kick só conta ~2 lives por vez.';
+    if (ch.earning === 'warming') st.title = 'A Twitch dá +10 a cada 5 min assistidos, e o baú de +50 aparece a cada ~15 min.';
+    if (ch.earning === 'idle') st.title = 'Tocando há mais de 13 min sem o saldo subir. A Twitch pode limitar quantas lives contam ao mesmo tempo.';
     if (ch.live && ch.goalLeft != null && state.rotation) st.title = `${st.title || ''}\nFaltam ${ch.goalLeft} pts para ${ch.goal}`.trim();
     const tdStatus = el('td'); tdStatus.append(st);
     if (ch.error) tdStatus.title = ch.error;
     const tdPts = el('td', null, ch.points != null ? ch.points.toLocaleString('pt-BR') : '—');
     if (ch.gained > 0) tdPts.append(' ', el('span', 'gain', `+${ch.gained}`));
     const eta = etaText(ch);
-    if (eta) { const e = el('div', 'eta', eta); e.title = 'Previsão pelo ritmo da Kick: 10 pts a cada 5 min (20 para subs)'; tdPts.append(e); }
+    if (eta) { const e = el('div', 'eta', eta); e.title = 'Previsão pelo ritmo da Twitch: 10 pts a cada 5 min + baú de 50 a cada 15 min (×1,2 para subs)'; tdPts.append(e); }
     const tdName = el('td', null, ch.displayName);
     if (ch.following) { const f = el('span', 'follow', '♥'); f.title = 'Você segue este canal'; tdName.append(' ', f); }
     if (ch.subscribed) tdName.append(' ', subBadge());
@@ -272,7 +272,7 @@ function applyState(s) {
   if (state.intro && !introShown) { introShown = true; showIntro(state.intro); }
   if (!$('#modal').hidden && modalKind === 'sleep') renderSleepList();
   $('#memory').textContent = state.memoryMB ? `${state.memoryMB} MB` : '';
-  $('#btn-login').textContent = state.loggedIn ? 'Conectado ✓' : 'Login Kick';
+  $('#btn-login').textContent = state.loggedIn ? 'Conectado ✓' : 'Login Twitch';
   $('#btn-login').classList.toggle('ok', !!state.loggedIn);
   $('#btn-logout').hidden = !state.loggedIn;
   if (document.activeElement !== $('#max-watchers')) $('#max-watchers').value = state.maxWatchers;
@@ -285,10 +285,12 @@ function applyState(s) {
 const clock = (ms) => { const m = Math.max(0, Math.ceil(ms / 60000)); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${m} min`; };
 const shortName = (name) => name.replace('+15% ', '');
 
-// Previsão do próximo bônus no ritmo da Kick (10 pts a cada 5 min; sub ganha 20).
+// Previsão do próximo bônus no ritmo da Twitch (10 pts a cada 5 min + baú de 50 a cada 15 min;
+// sub nível 1 ganha ×1,2 — ponytail: os níveis 2 e 3 rendem mais e a previsão fica pessimista).
+const PTS_PER_MIN = 10 / 5 + 50 / 15;
 function etaText(ch) {
   if (!ch.watching || ch.earning === 'idle' || ch.goalLeft == null || ch.goalLeft <= 0) return '';
-  const min = Math.ceil(ch.goalLeft / (ch.subscribed ? 4 : 2));
+  const min = Math.ceil(ch.goalLeft / (PTS_PER_MIN * (ch.subscribed ? 1.2 : 1)));
   return `⏱ ${clock(min * 60000)} → ${ch.goal.toLocaleString('pt-BR')}`;
 }
 
@@ -388,7 +390,7 @@ async function showReport() {
   const r = await window.kick.getReport();
   const card = el('div', 'report');
   const head = el('div', 'report-head');
-  head.append(el('span', 'brand', 'K'), el('b', null, ' Kickterino · minha semana'), el('span', 'report-date', new Date().toLocaleDateString('pt-BR')));
+  head.append($('#toolbar .brand').cloneNode(true), el('b', null, ' Twitchterino · minha semana'), el('span', 'report-date', new Date().toLocaleDateString('pt-BR')));
   const big = el('div', 'report-big');
   const stat = (value, label) => { const d = el('div', 'report-stat'); d.append(el('b', null, value), el('span', null, label)); return d; };
   big.append(stat(r.gained.toLocaleString('pt-BR'), 'pontos ganhos'), stat(String(r.bought.reduce((t, b) => t + b.count, 0)), 'bônus comprados'),
@@ -429,9 +431,9 @@ async function showReport() {
 function showIntro(kind) {
   const wrap = el('div', 'intro');
   if (kind === 'welcome') {
-    wrap.append(el('h3', null, 'Bem-vindo ao Kickterino 👋'));
+    wrap.append(el('h3', null, 'Bem-vindo ao Twitchterino 👋'));
     const steps = [
-      ['1. Faça login', 'Clique em Login Kick e entre com sua conta (e-mail, Google, Apple ou Discord).'],
+      ['1. Faça login', 'Clique em Login Twitch e entre com sua conta. Depois, adicione os canais no + das abas.'],
       ['2. Escolha seu bônus', 'Em Bônus, deixe Automático ou escolha XP, Capture Boost ou Secret Lure.'],
       ['3. Acompanhe no painel', 'Em Pontos ▸ você vê o saldo de cada canal, a previsão do próximo bônus e quanto tempo falta no seu bônus ativo.'],
       ['4. Compre na loja', 'O ícone de pontos ao lado do chat abre a loja do canal. A compra é sempre feita por você.'],
@@ -446,7 +448,6 @@ function showIntro(kind) {
       '🌙 Modo antes de dormir (opcional): abre as lojas uma de cada vez para empilhar bônus.',
       '★ Favoritos: ficam no começo das abas e avisam quando entram ao vivo.',
       '🎉 Destaque e aviso quando alguém menciona você ou quando aparece um sorteio no chat.',
-      '🤝 Novos parceiros do PokeIdle entram sozinhos na sua lista.',
     ];
     const ul = el('ul');
     for (const n of news) ul.append(el('li', null, n));
@@ -482,7 +483,7 @@ function toast(text, cls = '') {
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 300); }, 5000);
 }
 
-const CONFETTI_COLORS = ['#53fc18', '#ffcf4a', '#b65ad2', '#ffffff', '#4fc3ff'];
+const CONFETTI_COLORS = ['#9146ff', '#ffcf4a', '#b65ad2', '#ffffff', '#4fc3ff'];
 function confetti() {
   const c = $('#confetti');
   const ctx = c.getContext('2d');

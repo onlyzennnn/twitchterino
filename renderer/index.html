@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'">
-  <title>Kickterino</title>
+  <title>Twitchterino</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="features.css">
   <link rel="stylesheet" href="theme.css">
 </head>
 <body>
   <header id="toolbar">
-    <span class="brand">K</span><span class="brand-name">Kickterino</span>
-    <button id="btn-login" title="Abre a Kick para você fazer login (uma vez só)">Login Kick</button>
+    <span class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg></span><span class="brand-name">Twitchterino</span>
+    <button id="btn-login" title="Abre a Twitch para você fazer login (uma vez só)">Login Twitch</button>
     <button id="btn-logout" title="Apaga os dados de login salvos neste PC" hidden>Sair da conta</button>
     <label class="toggle"><input type="checkbox" id="farming"> Farmar pontos</label>
     <label class="toggle" title="Lives ocultas rodam em 160p, sem imagens: gasta bem menos memória e internet"><input type="checkbox" id="low-quality"> Modo leve (160p)</label>
-    <label title="Quantas lives tocam ao mesmo tempo. Nos testes, a Kick só contou pontos em 2 lives por vez: mais que isso gasta memória sem render mais pontos. As outras ficam na fila.">Lives ao mesmo tempo <input type="number" id="max-watchers" min="1" max="30"></label>
+    <label title="Quantas lives tocam ao mesmo tempo. Na Kick só 2 contavam pontos; na Twitch, use o teste de limite do painel para conferir. As outras ficam na fila.">Lives ao mesmo tempo <input type="number" id="max-watchers" min="1" max="30"></label>
     <label class="toggle" title="Ligado: as vagas vão para os canais mais perto do bônus escolhido e, quando um chega lá, passa para o próximo. Canais em que você é sub vêm primeiro enquanto estiverem ao vivo. Desligado: ficam só os primeiros canais da lista."><input type="checkbox" id="rotation"> Foco em bônus</label>
     <label title="Qual bônus o foco deve buscar. Automático: todos chegam a 300, depois 500 e 1.000. Escolhendo um, as vagas juntam pontos até o custo dele nos canais mais perto, e só esse bônus avisa.">Bônus <select id="bonus-target">
       <option value="0">Automático</option>
@@ -27,9 +27,9 @@
     <label class="toggle" title="Avisa quando um canal alcança 300, 500 ou 1.000 pontos"><input type="checkbox" id="notify-bonus"> Avisar bônus</label>
     <button id="btn-refresh">Atualizar</button>
     <span id="summary"></span>
-    <span id="memory" title="Memória total usada pelo Kickterino"></span>
+    <span id="memory" title="Memória total usada pelo Twitchterino"></span>
     <button id="btn-panel" title="Painel de pontos">Pontos ▸</button>
-    <button id="btn-quit" title="Fecha o Kickterino de vez (para o farm)" hidden>Sair</button>
+    <button id="btn-quit" title="Fecha o Twitchterino de vez (para o farm)" hidden>Sair</button>
   </header>
 
   <nav id="tabs"></nav>
@@ -64,7 +64,7 @@
         <tbody id="panel-rows"></tbody>
       </table>
       <div id="limit-box">
-        <button id="btn-limit" title="Abre todas as lives ao vivo e mede quantas a Kick conta; se não forem todas, testa números menores (~20 min por etapa) e ajusta o app para o que rende mais pontos">Descobrir limite de lives</button>
+        <button id="btn-limit" title="Abre todas as lives ao vivo e mede quantas a Twitch conta; se não forem todas, testa números menores (~20 min por etapa) e ajusta o app para o que rende mais pontos">Descobrir limite de lives</button>
         <div id="limit-info"></div>
       </div>
       <div id="tools">
@@ -72,7 +72,7 @@
         <label class="toggle" title="Destaca no chat quando alguém escreve seu nome e quando aparece um sorteio, e avisa se a janela estiver escondida"><input type="checkbox" id="notify-chat"> Avisar menções e sorteios</label>
         <label class="toggle" title="Mostra o botão Antes de dormir no topo deste painel: ele lista os canais com pontos para bônus e abre as lojas uma de cada vez. Só abre quando você clica."><input type="checkbox" id="sleep-mode"> Modo antes de dormir</label>
       </div>
-      <p class="hint">A Kick dá 10 pontos a cada ~5 min por live, mas só conta cerca de 2 lives por vez por conta. Como o saldo é separado por canal, o padrão é 2 lives com foco em bônus: as vagas vão para quem está mais perto de 300 e, depois que todos chegam lá, de 500 e 1.000. Canais em que você é sub rendem o dobro: têm prioridade e ficam até sair do ar, sem meta de bônus. A primeira contagem chega ~6–7 min depois que a live abre (status AQUECENDO).</p>
+      <p class="hint">A Twitch dá 10 pontos a cada 5 min por live, e o app clica sozinho no baú de +50 que aparece a cada ~15 min. Como o saldo é separado por canal, o padrão é 2 lives com foco em bônus: as vagas vão para quem está mais perto de 300 e, depois que todos chegam lá, de 500 e 1.000. Canais em que você é sub rendem mais: têm prioridade e ficam até sair do ar, sem meta de bônus. Logo depois que a live abre, o status fica AQUECENDO até o primeiro ganho.</p>
     </aside>
   </main>
 

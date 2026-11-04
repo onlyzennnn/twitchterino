@@ -1,9 +1,9 @@
-// Kickterino — processo principal.
-// Ideia: uma sessão de navegador persistente (você faz login na Kick uma vez),
-// uma janela oculta "api" em kick.com para consultar status/pontos, e uma janela
+// Twitchterino — processo principal (adaptado do Kickterino).
+// Ideia: uma sessão de navegador persistente (você faz login na Twitch uma vez),
+// uma janela oculta "api" em twitch.tv para consultar status/pontos, e uma janela
 // oculta e muda por canal AO VIVO tocando o player real — é isso que conta como "assistindo".
 const {
-  app, BrowserWindow, dialog, ipcMain, session, Tray, Menu, Notification, nativeImage, powerSaveBlocker, powerMonitor, net,
+  app, BrowserWindow, dialog, ipcMain, session, Tray, Menu, Notification, nativeImage, powerSaveBlocker, powerMonitor,
 } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
@@ -21,22 +21,25 @@ app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion,Ba
 app.commandLine.appendSwitch('js-flags', '--max-semi-space-size=1');
 
 // Pasta de dados alternativa (testes sem mexer na instalação de verdade).
-if (process.env.KICKTERINO_DATA) app.setPath('userData', process.env.KICKTERINO_DATA);
+if (process.env.TWITCHTERINO_DATA) app.setPath('userData', process.env.TWITCHTERINO_DATA);
 
-const PARTITION = 'persist:kick';
-const KICK = 'https://kick.com';
+const PARTITION = 'persist:twitch';
+const TWITCH = 'https://www.twitch.tv';
+// Client-Id público do site da Twitch: é o que a própria página usa no GraphQL.
+const CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 const POLL_MS = 60 * 1000;
 const PLAYER_CHECK_MS = 30 * 1000;
 
 const configPath = () => path.join(app.getPath('userData'), 'config.json');
 const DEFAULT_CONFIG = {
+  // Canais com "pontos ativos" no painel Bônus Twitch do PokeIdle (04/11/2026).
   channels: [
-    'yetz', 'biscoitao', 'surskity', 'tftoddy', 'techzz', 'clovaobengalalol', 'axt', 'yulla', 'faturetosl',
-    'cogu', 'rodil', 'patopapao2', 'matta', 'luccatv', 'guaxilol1', 'dersin2k', 'mecmeno',
+    'clovaobengala', 'dersin2k', 'mecmeno', 'guaxilol1', 'cogu', 'denissnidertv', 'faturetosl',
+    'patopapao', 'matta', 'biscoitao', 'tftoddy', 'luccatv', 'techzz', 'yetz', 'revolta',
   ],
   farming: true,
-  // Medido em 30/10/2026: a Kick só contou pontos em ~2 lives por vez (12 abertas renderam o
-  // mesmo que 2). Mais vagas só gastam memória; o rodízio espalha os pontos entre os canais.
+  // Na Kick, só ~2 lives por vez contavam pontos. Na Twitch o limite ainda não foi medido:
+  // o teste de limite do painel confere.
   maxWatchers: 2,
   lowQuality: true,
   rotation: true,
@@ -79,7 +82,7 @@ const watchers = new Map(); // slug -> BrowserWindow
 const status = new Map();   // slug -> { live, viewers, chatroomId, title, points, watchedMs, watchingSince, error }
 
 function send(channel, payload) {
-  if (process.env.KICKTERINO_DEBUG && channel === 'chat') console.log(`CHAT ${payload.slug} ${payload.kind} ${payload.data.username || payload.data.sender.username}`);
+  if (process.env.TWITCHTERINO_DEBUG && channel === 'chat') console.log(`CHAT ${payload.slug} ${payload.kind} ${payload.data.username || payload.data.sender.username}`);
   if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, payload);
 }
 
@@ -111,30 +114,35 @@ function setupSession() {
   ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, cb) => {
     const url = details.url;
     cb({
-      cancel: BLOCKED_HOSTS.some((h) => url.includes(h)) || url.startsWith('https://static.kick.com/ads/')
+      cancel: BLOCKED_HOSTS.some((h) => url.includes(h))
         || (HIDDEN_SKIP.has(details.resourceType) && isHiddenWatcher(details.webContents)),
     });
   });
 }
 
-// Deixa só a menor qualidade (160p) na lista de qualidades da live — o mesmo que escolher 160p no player.
+// Deixa só a menor qualidade com vídeo (160p) na lista de qualidades da live — o mesmo que
+// escolher 160p no player. Na Twitch cada qualidade vem com a linha #EXT-X-MEDIA logo antes.
 function lowestQualityOnly(playlist) {
   const lines = playlist.split('\n');
   const head = [];
   const variants = [];
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].startsWith('#EXT-X-STREAM-INF')) { variants.push([lines[i], lines[i + 1]]); i++; }
-    else if (!variants.length) head.push(lines[i]);
+    if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+      const media = i > 0 && lines[i - 1].startsWith('#EXT-X-MEDIA') ? [lines[i - 1]] : [];
+      variants.push({ inf: lines[i], block: [...media, lines[i], lines[i + 1]] });
+      i++;
+    } else if (!variants.length && !lines[i].startsWith('#EXT-X-MEDIA')) head.push(lines[i]);
   }
-  if (variants.length < 2) return null;
+  const video = variants.filter((v) => !v.inf.includes('audio_only'));
+  if (video.length < 2) return null;
   const bandwidth = (l) => Number((l.match(/BANDWIDTH=(\d+)/) || [0, Infinity])[1]);
-  variants.sort((a, b) => bandwidth(a[0]) - bandwidth(b[0]));
-  return [...head, ...variants[0]].join('\n') + '\n';
+  video.sort((a, b) => bandwidth(a.inf) - bandwidth(b.inf));
+  return [...head, ...video[0].block].join('\n') + '\n';
 }
 
-// Só a Kick e as páginas de login que ela usa abrem no app: nada de site de fora na mesma
+// Só a Twitch e as páginas de login que ela usa abrem no app: nada de site de fora na mesma
 // sessão que guarda o login. Pop-ups de login abrem numa janela normal com a mesma sessão.
-const TRUSTED_DOMAINS = ['kick.com', 'google.com', 'accounts.youtube.com', 'apple.com', 'discord.com'];
+const TRUSTED_DOMAINS = ['twitch.tv', 'google.com', 'accounts.youtube.com', 'apple.com', 'amazon.com', 'amazon.com.br'];
 const GOOGLE_REGIONAL = /^accounts\.google\.(com?\.)?[a-z]{2}$/; // o Google passa pelo domínio do país no login
 
 function isTrustedUrl(url) {
@@ -156,8 +164,8 @@ app.on('web-contents-created', (_e, wc) => {
   wc.on('will-redirect', guard);
 });
 
-// Página "vazia" em kick.com: mesma origem e cookies, mas sem carregar o site inteiro.
-const LIGHT_URL = `${KICK}/robots.txt`;
+// Página "vazia" em twitch.tv: mesma origem e cookies, mas sem carregar o site inteiro.
+const LIGHT_URL = `${TWITCH}/robots.txt`;
 
 const withTimeout = (promise, ms) => Promise.race([
   promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
@@ -171,11 +179,11 @@ function loadApi(url) {
 
 function createApiWindow() {
   apiWin = new BrowserWindow({
-    width: 1100, height: 800, show: false, title: 'Kick — login', autoHideMenuBar: true,
+    width: 1100, height: 800, show: false, title: 'Twitch — login', autoHideMenuBar: true,
     webPreferences: { partition: PARTITION, backgroundThrottling: false },
   });
   apiWin.webContents.setAudioMuted(true);
-  // Sem internet ou com a Kick fora do ar: tenta de novo sozinho. Nunca durante o login.
+  // Sem internet ou com a Twitch fora do ar: tenta de novo sozinho. Nunca durante o login.
   const retryApi = () => setTimeout(() => { if (!apiWin.isVisible()) loadApi(LIGHT_URL); }, 30 * 1000);
   apiWin.webContents.on('did-fail-load', (_e, code, _desc, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) retryApi();
@@ -191,7 +199,7 @@ function createApiWindow() {
   });
 }
 
-// Loja de pontos: o chat popout oficial da Kick, que tem o saldo e as recompensas do canal.
+// Loja de pontos: o chat popout oficial da Twitch, que tem o saldo e as recompensas do canal.
 const storeWindows = new Map();
 function openStore(slug, title = `Pontos — ${slug}`) {
   let win = storeWindows.get(slug);
@@ -201,7 +209,7 @@ function openStore(slug, title = `Pontos — ${slug}`) {
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: { partition: PARTITION },
   });
-  win.loadURL(`${KICK}/popout/${slug}/chat`);
+  win.loadURL(`${TWITCH}/popout/${slug}/chat`);
   win.on('page-title-updated', (e) => e.preventDefault()); // mantém o "(2 de 4)" do modo antes de dormir
   win.on('closed', () => {
     storeWindows.delete(slug);
@@ -225,23 +233,20 @@ function openNextStore() {
 }
 
 async function sessionToken() {
-  const cookies = await session.fromPartition(PARTITION).cookies.get({ url: KICK, name: 'session_token' });
+  const cookies = await session.fromPartition(PARTITION).cookies.get({ url: TWITCH, name: 'auth-token' });
   return cookies[0] ? decodeURIComponent(cookies[0].value) : '';
 }
 
-// Faz um fetch de dentro da página kick.com (mesmos cookies/headers de um navegador normal).
-async function kickFetch(apiPath, { method = 'GET', body } = {}) {
+// Consulta o GraphQL da Twitch de dentro da página twitch.tv (mesmos cookies/headers de um navegador normal).
+async function gql(query, variables = {}) {
   await withTimeout(apiReady, 20 * 1000);
   const token = await sessionToken();
   const code = `(async () => {
-    const xsrf = decodeURIComponent((document.cookie.match(/XSRF-TOKEN=([^;]+)/) || [])[1] || '');
-    const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json' };
+    const headers = { 'Client-Id': ${JSON.stringify(CLIENT_ID)}, 'Content-Type': 'application/json' };
     const token = ${JSON.stringify(token)};
-    if (token) headers['Authorization'] = 'Bearer ' + token;
-    if (xsrf) headers['X-XSRF-TOKEN'] = xsrf;
-    const r = await fetch(${JSON.stringify(apiPath)}, {
-      method: ${JSON.stringify(method)}, headers, credentials: 'include',
-      ${body ? `body: ${JSON.stringify(JSON.stringify(body))},` : ''}
+    if (token) headers['Authorization'] = 'OAuth ' + token;
+    const r = await fetch('https://gql.twitch.tv/gql', {
+      method: 'POST', headers, body: ${JSON.stringify(JSON.stringify({ query, variables }))},
     });
     return { status: r.status, text: await r.text() };
   })()`;
@@ -251,8 +256,41 @@ async function kickFetch(apiPath, { method = 'GET', body } = {}) {
   return { status: res.status, json };
 }
 
-// Na janela de cada live: força 160p enquanto ela está oculta e lê o chat do websocket
-// que a própria página da Kick abre (realtime.*.kick.com), repassando mensagens e resgates.
+// Uma linha do chat IRC da Twitch no formato que a interface já mostrava (o da Kick).
+const ircUnescape = (v = '') => v.replace(/\\s/g, ' ').replace(/\\:/g, ';').replace(/\\\\/g, '\\');
+function parseIrcMessage(line) {
+  const m = line.match(/^@(\S+) :([^!\s]+)!\S+ PRIVMSG #\S+ :(.*)$/);
+  if (!m) return null;
+  const tags = {};
+  for (const kv of m[1].split(';')) { const i = kv.indexOf('='); tags[kv.slice(0, i)] = ircUnescape(kv.slice(i + 1)); }
+  const data = {
+    id: tags.id, content: m[3], created_at: Number(tags['tmi-sent-ts']) || Date.now(),
+    sender: {
+      username: tags['display-name'] || m[2],
+      identity: { color: tags.color || null, badges: (tags.badges || '').split(',').filter(Boolean).map((b) => ({ type: b.split('/')[0] })) },
+    },
+  };
+  if (tags['reply-parent-display-name']) {
+    data.type = 'reply';
+    data.metadata = { original_sender: { username: tags['reply-parent-display-name'] }, original_message: { content: tags['reply-parent-msg-body'] } };
+  }
+  return data;
+}
+
+// Baú de bônus (+50 pts): aparece a cada ~15 min no chat de quem está assistindo e só conta
+// se alguém clicar. A página clica nele sozinha e conta os cliques (lidos em checkPlayers).
+const CLAIM_BONUS = `if (window.__twitchterinoClaims == null) {
+  window.__twitchterinoClaims = 0;
+  setInterval(() => {
+    const icon = document.querySelector('.claimable-bonus__icon');
+    if (!icon) return;
+    (icon.closest('button') || icon).click();
+    window.__twitchterinoClaims++;
+  }, 10 * 1000);
+}`;
+
+// Na janela de cada live: força 160p enquanto ela está oculta, clica no baú de bônus e lê o
+// chat do websocket IRC que a própria página da Twitch abre, repassando as mensagens.
 function instrumentWatcher(slug, win) {
   const dbg = win.webContents.debugger;
   try { dbg.attach('1.3'); } catch { return; }
@@ -274,23 +312,16 @@ function instrumentWatcher(slug, win) {
       return;
     }
     if (method !== 'Network.webSocketFrameReceived') return;
-    for (const line of p.response.payloadData.split('\n')) {
-      let frame;
-      try { frame = JSON.parse(line); } catch { continue; }
-      const pub = frame.push && frame.push.pub && frame.push.pub.data;
-      if (!pub || typeof pub.data !== 'string') continue;
-      let data;
-      try { data = JSON.parse(pub.data); } catch { continue; }
-      if (pub.event === 'App\\Events\\ChatMessageEvent') {
-        if (seen.has(data.id)) continue;
-        seen.add(data.id);
-        if (seen.size > 2000) seen.clear();
-        send('chat', { slug, kind: 'message', data });
-      } else if (pub.event === 'RewardRedeemedEvent') {
-        send('chat', { slug, kind: 'reward', data });
-      }
+    for (const line of p.response.payloadData.split('\r\n')) {
+      const data = parseIrcMessage(line);
+      if (!data || seen.has(data.id)) continue;
+      seen.add(data.id);
+      if (seen.size > 2000) seen.clear();
+      send('chat', { slug, kind: 'message', data });
     }
   });
+  // Depois de cada carga da página (Page.addScriptToEvaluateOnNewDocument trava se chamado antes da navegação).
+  win.webContents.on('did-finish-load', () => win.webContents.executeJavaScript(CLAIM_BONUS).catch(() => {}));
   dbg.sendCommand('Network.enable').catch(() => {});
   dbg.sendCommand('Fetch.enable', { patterns: [{ urlPattern: '*.m3u8*', requestStage: 'Response' }] }).catch(() => {});
 }
@@ -318,7 +349,7 @@ function makeInvisible(win) {
 function startWatcher(slug) {
   if (watchers.has(slug)) return;
   const win = new BrowserWindow({
-    width: 480, height: 270, x: 0, y: 0, show: false, title: `Kick — ${slug}`, autoHideMenuBar: true,
+    width: 480, height: 270, x: 0, y: 0, show: false, title: `Twitch — ${slug}`, autoHideMenuBar: true,
     type: 'toolbar', skipTaskbar: true, focusable: false, opacity: 0,
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: { partition: PARTITION, backgroundThrottling: false, spellcheck: false },
@@ -328,7 +359,7 @@ function startWatcher(slug) {
   watcherIds.add(wcId);
   win.on('closed', () => watcherIds.delete(wcId));
   instrumentWatcher(slug, win);
-  win.loadURL(`${KICK}/${slug}`);
+  win.loadURL(`${TWITCH}/${slug}`);
   makeInvisible(win);
   // Fechar a live aberta só a torna invisível de novo: volta para 160p, sem som e sem imagens.
   win.on('close', (e) => {
@@ -387,8 +418,9 @@ function checkBonus(slug, s) {
 
 // ---------- Bônus ativos, histórico e relatório ----------
 // Cada bônus dura 1 h e as horas compradas se somam. A compra é percebida pela queda do saldo:
-// entre duas leituras o saldo pode ter subido até ~25 pts, então vale a menor combinação de
-// bônus que explica a queda. Compras que a pessoa registra à mão entram igual.
+// entre duas leituras o saldo pode ter subido até ~60 pts (10 de assistir + 50 do baú), então
+// vale a menor combinação de bônus que explica a queda. Compras que a pessoa registra à mão entram igual.
+const MAX_GAIN_BETWEEN_READS = 60;
 const BONUS_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const KEEP_PURCHASES_MS = 10 * DAY_MS;
@@ -406,7 +438,7 @@ function matchPurchase(drop) {
   let best = null;
   for (let c = 0; c <= 6; c++) for (let b = 0; b <= 6; b++) for (let a = 0; a <= 6; a++) {
     const n = a + b + c, sum = 300 * a + 500 * b + 1000 * c;
-    if (!n || sum < drop || sum > drop + 25 || (best && n >= best.length)) continue;
+    if (!n || sum < drop || sum > drop + MAX_GAIN_BETWEEN_READS || (best && n >= best.length)) continue;
     best = [...Array(c).fill(1000), ...Array(b).fill(500), ...Array(a).fill(300)];
   }
   return best || [];
@@ -494,67 +526,54 @@ function weeklyReport(now = Date.now()) {
   };
 }
 
-// Lista de parceiros no site: parceiro novo entra para todos sem precisar de versão nova.
-// Quem a pessoa removeu não volta (mesma regra dos canais padrão).
-const PARTNERS_URL = 'https://viinnisantoos.github.io/kickterino/parceiros.json';
-async function syncPartners() {
-  try {
-    const res = await net.fetch(PARTNERS_URL, { cache: 'no-store' });
-    if (!res.ok) return;
-    const list = ((await res.json()).channels || []).map(String).filter((s) => /^[a-z0-9_-]{2,30}$/.test(s)).slice(0, 60);
-    const seen = new Set(config.seenDefaults || []);
-    const fresh = list.filter((slug) => !seen.has(slug) && !config.channels.includes(slug));
-    config.seenDefaults = [...new Set([...seen, ...list])];
-    if (fresh.length) { config.channels.push(...fresh); poll(); }
-    saveConfig();
-  } catch {}
-}
+// Status da live, saldo, follow e sub numa consulta só. GraphQL interno da Twitch: pode mudar sem aviso.
+const CHANNEL_QUERY = `query($login: String!) { user(login: $login) {
+  displayName stream { viewersCount title }
+  channel { self { communityPoints { balance } } }
+  self { follower { followedAt } subscriptionBenefit { id } }
+} }`;
 
 async function refreshChannel(slug) {
   const s = status.get(slug) || { watchedMs: 0 };
+  let user = null;
   try {
-    const { status: code, json } = await kickFetch(`/api/v2/channels/${slug}`);
+    const { status: code, json } = await gql(CHANNEL_QUERY, { login: slug });
     if (code !== 200 || !json) throw new Error(`HTTP ${code}`);
-    s.chatroomId = json.chatroom && json.chatroom.id;
+    user = json.data && json.data.user;
+    if (!user) throw new Error('canal não encontrado');
+    s.chatroomId = slug;
     const wasLive = s.live;
-    s.live = !!json.livestream;
+    s.live = !!user.stream;
     // Favorito que acabou de entrar ao vivo (no primeiro carregamento não avisa).
     if (wasLive === false && s.live && config.favorites.includes(slug)) {
-      const name = (json.user && json.user.username) || slug;
-      notify(`★ ${name} entrou ao vivo`, json.livestream.session_title || 'Clique para abrir o chat.', () => { showMain(); send('select', slug); });
+      notify(`★ ${user.displayName || slug} entrou ao vivo`, user.stream.title || 'Clique para abrir o chat.', () => { showMain(); send('select', slug); });
     }
-    s.viewers = json.livestream ? json.livestream.viewer_count : 0;
-    s.title = json.livestream ? json.livestream.session_title : '';
-    s.displayName = (json.user && json.user.username) || slug;
+    s.viewers = user.stream ? user.stream.viewersCount : 0;
+    s.title = user.stream ? user.stream.title : '';
+    s.displayName = user.displayName || slug;
     s.error = null;
   } catch (e) {
     s.error = String(e.message || e);
   }
-  // Se a conta segue o canal (só logado) — para conferir se seguir influencia nos pontos.
-  try {
-    const { status: code, json } = await kickFetch(`/api/v2/channels/${slug}/me`);
-    if (code === 200 && json && typeof json.is_following === 'boolean') s.following = json.is_following;
-    // Quem é sub ganha o dobro de pontos naquele canal (20 a cada 5 min).
-    if (code === 200 && json && 'subscription' in json) s.subscribed = !!json.subscription;
-  } catch {}
-  // Saldo de pontos — endpoint não documentado; se falhar, só mostramos "—".
-  try {
-    const { status: code, json } = await kickFetch(`/api/v2/channels/${slug}/points`);
-    if (code === 200 && json) {
-      const p = json.data ? json.data.points : json.points;
-      if (typeof p === 'number') {
-        // Ganho de assistir (gastos na loja fazem o saldo cair e não contam).
-        if (s.points != null && p > s.points) {
-          s.gainedTotal = (s.gainedTotal || 0) + (p - s.points);
-          if (watchers.has(slug)) s.lastGainAt = Date.now();
-          addDaily(p - s.points);
-        }
-        if (s.points != null && p < s.points) registerPurchases(slug, s.points - p);
-        s.points = p;
-        checkBonus(slug, s);
-      }
+  // Follow e sub (só logado). Sub na Twitch rende mais pontos naquele canal.
+  if (user && user.self) {
+    s.following = !!user.self.follower;
+    s.subscribed = !!user.self.subscriptionBenefit;
+  }
+  // Saldo de pontos (só logado); sem ele, só mostramos "—".
+  const p = user && user.channel && user.channel.self && user.channel.self.communityPoints
+    && user.channel.self.communityPoints.balance;
+  if (typeof p === 'number') {
+    // Ganho de assistir e do baú (gastos na loja fazem o saldo cair e não contam).
+    if (s.points != null && p > s.points) {
+      s.gainedTotal = (s.gainedTotal || 0) + (p - s.points);
+      if (watchers.has(slug)) s.lastGainAt = Date.now();
+      addDaily(p - s.points);
     }
-  } catch {}
+    if (s.points != null && p < s.points) registerPurchases(slug, s.points - p);
+    s.points = p;
+    checkBonus(slug, s);
+  }
   status.set(slug, s);
 }
 
@@ -568,7 +587,9 @@ async function checkPlayers() {
     const info = await withTimeout(win.webContents.executeJavaScript(`(() => {
       const v = document.querySelector('video');
       return {
-        gate: !!document.querySelector('[data-testid="mature"]'),
+        gate: !!document.querySelector('[data-a-target="content-classification-gate-overlay-start-watching-button"], [data-a-target="player-overlay-mature-accept"]'),
+        pointsWidget: !!document.querySelector('[data-test-selector="community-points-summary"]'),
+        claims: window.__twitchterinoClaims ?? null,
         visibility: document.visibilityState,
         video: v ? { paused: v.paused, time: Math.round(v.currentTime), height: v.videoHeight, ready: v.readyState } : null,
       };
@@ -579,13 +600,15 @@ async function checkPlayers() {
     });
     if (!info) continue;
     s.ageGate = info.gate;
+    s.pointsWidget = info.pointsWidget; // sem o widget de pontos na página, o baú não aparece
+    s.claims = info.claims; // cliques no baú desde que a página abriu (null = script do baú não rodou)
     s.visibility = info.visibility;
     s.video = info.video;
   }
 }
 
-// "Ganhando": o saldo subiu nos últimos minutos enquanto a live tocava. A primeira contagem
-// leva ~6–7 min depois que a live abre; depois, +10 a cada ~5–6 min.
+// "Ganhando": o saldo subiu nos últimos minutos enquanto a live tocava. Na Twitch são +10 a
+// cada 5 min assistidos e +50 do baú a cada ~15 min.
 const EARN_WINDOW_MS = 13 * 60 * 1000;
 function earningState(slug, now) {
   const s = status.get(slug) || {};
@@ -606,7 +629,7 @@ function logHistory() {
     channels[slug] = {
       live: !!s.live, watching: watchers.has(slug), points: s.points ?? null, following: s.following ?? null,
       subscribed: !!s.subscribed, earning: earningState(slug, now), video: s.video || null, visibility: s.visibility || null,
-      gate: !!s.ageGate, watchedMin: Math.floor(totalWatched(slug, now) / 60000),
+      gate: !!s.ageGate, pointsWidget: s.pointsWidget ?? null, claims: s.claims ?? null, watchedMin: Math.floor(totalWatched(slug, now) / 60000),
     };
   }
   const line = JSON.stringify({
@@ -625,7 +648,7 @@ function logHistory() {
 // vão para quem está mais perto do próximo bônus, e todos os canais ao vivo chegam a 300 antes
 // de alguém buscar 500, depois 1.000 e cada milhar seguinte. Cada troca perde ~6–7 min até a primeira contagem, por isso só troca
 // quando o canal bateu a meta ou quando a diferença compensa (SWITCH_MARGIN).
-// Canal com sub rende o dobro: entra na frente de todos e fica enquanto estiver ao vivo, sem meta.
+// Canal com sub rende mais (multiplicador da Twitch): entra na frente de todos e fica enquanto estiver ao vivo, sem meta.
 const SWITCH_MARGIN = 50;
 const IDLE_COOLDOWN_MS = 30 * 60 * 1000;
 
@@ -663,13 +686,13 @@ const totalWatched = (slug, now) => {
 const turnTime = (slug, now) => now - ((status.get(slug) || {}).watchingSince || now);
 const isShown = (slug) => { const w = watchers.get(slug); return !!w && !w.isDestroyed() && userOpened.has(w); };
 
-// Rodando direto, a página da Kick vai acumulando memória: renova a live de tempos em tempos.
+// Rodando direto, a página da live vai acumulando memória: renova a live de tempos em tempos.
 const RECYCLE_MS = 6 * 60 * 60 * 1000;
 
 function reconcileWatchers() {
   const now = Date.now();
-  // Sem login a Kick não dá pontos: abrir live só gastaria memória.
-  const canFarm = config.farming && (loggedIn || process.env.KICKTERINO_ALLOW_ANON);
+  // Sem login a Twitch não dá pontos: abrir live só gastaria memória.
+  const canFarm = config.farming && (loggedIn || process.env.TWITCHTERINO_ALLOW_ANON);
   for (const slug of [...watchers.keys()]) {
     const s = status.get(slug);
     if (isShown(slug)) continue;
@@ -711,14 +734,15 @@ function reconcileWatchers() {
   }
 }
 
-// Teste de limite: descobre quantas lives a Kick conta ao mesmo tempo. Em cada etapa abre N
-// lives (sem rodízio), ignora o aquecimento e mede quantos pontos entraram no resto da etapa.
-// Uma live no ritmo cheio rende 10 pts a cada 5 min, então "lives contando" ≈ pts / (min × 2).
+// Teste de limite: descobre quantas lives a Twitch conta ao mesmo tempo. Em cada etapa abre N
+// lives (sem rodízio), ignora o aquecimento e conta quantas ganharam pontos no resto da etapa.
+// Contar lives em vez de somar pontos: o baú (+50 a cada ~15 min) cai dentro ou fora da janela
+// de medição e faria a soma variar muito entre etapas.
 // A 1ª etapa abre TODAS as lives ao vivo: se todas contarem, acaba ali. Senão, testa só os
 // números até um pouco acima do que contou, para achar o menor que rende o máximo.
 const LIMIT_LADDER = [2, 3, 4, 6, 8, 10, 13, 16, 20];
-const LIMIT_STEP_MS = (Number(process.env.KICKTERINO_LIMIT_STEP_MIN) || 20) * 60 * 1000;
-const LIMIT_WARMUP_MS = (Number(process.env.KICKTERINO_LIMIT_WARMUP_MIN) || 8) * 60 * 1000;
+const LIMIT_STEP_MS = (Number(process.env.TWITCHTERINO_LIMIT_STEP_MIN) || 20) * 60 * 1000;
+const LIMIT_WARMUP_MS = (Number(process.env.TWITCHTERINO_LIMIT_WARMUP_MIN) || 8) * 60 * 1000;
 let limitTest = null;
 
 const sumGained = () => [...status.values()].reduce((t, s) => t + (s.gainedTotal || 0), 0);
@@ -747,17 +771,20 @@ function advanceLimitTest() {
   if (!limitTest) return;
   const now = Date.now();
   const elapsed = now - limitTest.stepStart;
+  const gained = (slug) => (status.get(slug) || {}).gainedTotal || 0;
   if (limitTest.baseline == null && elapsed >= LIMIT_WARMUP_MS) {
     limitTest.baseline = sumGained();
     limitTest.baselineAt = now;
+    limitTest.baselineBySlug = Object.fromEntries([...watchers.keys()].map((slug) => [slug, gained(slug)]));
   }
   if (elapsed < LIMIT_STEP_MS || limitTest.baseline == null) return;
 
   const minutes = (now - limitTest.baselineAt) / 60000;
   const pts = sumGained() - limitTest.baseline;
+  const counting = Object.entries(limitTest.baselineBySlug)
+    .filter(([slug, before]) => watchers.has(slug) && gained(slug) > before).length;
   const result = {
-    lives: limitTest.steps[limitTest.i], playing: watchers.size, minutes: Math.round(minutes),
-    pts, counting: Math.round((pts / (minutes * 2)) * 10) / 10,
+    lives: limitTest.steps[limitTest.i], playing: watchers.size, minutes: Math.round(minutes), pts, counting,
   };
   limitTest.results.push(result);
   if (limitTest.i === 0) {
@@ -772,9 +799,9 @@ function advanceLimitTest() {
     config.maxWatchers = limitTest.steps[limitTest.i];
     return;
   }
-  // Fim: fica com o menor número de lives que rendeu pelo menos 90% do melhor resultado.
-  const best = Math.max(...limitTest.results.map((r) => r.pts));
-  const chosen = [...limitTest.results].sort((a, b) => a.lives - b.lives).find((r) => r.pts >= best * 0.9)
+  // Fim: fica com o menor número de lives em que contaram tantas lives quanto no melhor resultado.
+  const best = Math.max(...limitTest.results.map((r) => r.counting));
+  const chosen = [...limitTest.results].sort((a, b) => a.lives - b.lives).find((r) => r.counting >= best)
     || limitTest.results[0];
   config.limitResult = { at: new Date(now).toISOString(), results: limitTest.results, chosen: chosen.lives };
   config.maxWatchers = chosen.lives;
@@ -843,14 +870,11 @@ let loggedIn = false;
 // Nome da conta logada: o chat destaca quando alguém menciona você.
 let username = null;
 async function fetchUsername() {
-  for (const p of ['/api/v1/user', '/api/v2/user']) {
-    try {
-      const { status: code, json } = await kickFetch(p);
-      const name = code === 200 && json && (json.username || (json.user && json.user.username));
-      if (name) return String(name);
-    } catch {}
-  }
-  return null;
+  try {
+    const { json } = await gql('query { currentUser { login } }');
+    const user = json && json.data && json.data.currentUser;
+    return user ? String(user.login) : null;
+  } catch { return null; }
 }
 async function poll() {
   if (polling && Date.now() - pollStartedAt < POLL_STUCK_MS) return;
@@ -859,7 +883,7 @@ async function poll() {
   pollStartedAt = startedAt;
   try {
     loggedIn = !!(await sessionToken());
-    await withTimeout(apiReady, 5 * 1000); // sem a página da Kick não há o que consultar agora
+    await withTimeout(apiReady, 5 * 1000); // sem a página da Twitch não há o que consultar agora
     if (!loggedIn) username = null;
     else if (!username) username = await fetchUsername();
     for (const slug of config.channels) await refreshChannel(slug);
@@ -874,7 +898,7 @@ async function poll() {
     logHistory();
     send('status', snapshot());
     updateTray();
-    if (process.env.KICKTERINO_DEBUG) {
+    if (process.env.TWITCHTERINO_DEBUG) {
       console.log(JSON.stringify(snapshot()));
       for (const [slug, win] of watchers) {
         const h = await win.webContents.executeJavaScript(`(document.querySelector('video') || {}).videoHeight`).catch(() => '?');
@@ -884,7 +908,7 @@ async function poll() {
       for (const m of app.getAppMetrics()) console.log(`PROC ${m.type} ${Math.round(m.memory.workingSetSize / 1024)}MB`);
     }
   } catch {
-    // Kick ou internet fora do ar: a próxima rodada tenta de novo.
+    // Twitch ou internet fora do ar: a próxima rodada tenta de novo.
   } finally { if (pollStartedAt === startedAt) polling = false; }
 }
 
@@ -908,7 +932,7 @@ function setFarming(on) {
 // O app portátil roda de uma pasta temporária: o que abre com o Windows é o .exe original.
 const LOGIN_ITEM = { path: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath, args: ['--hidden'] };
 // No Linux, abrir com o sistema é um atalho na pasta autostart (o AppImage informa o próprio caminho).
-const autostartFile = () => path.join(process.env.XDG_CONFIG_HOME || path.join(app.getPath('home'), '.config'), 'autostart', 'kickterino.desktop');
+const autostartFile = () => path.join(process.env.XDG_CONFIG_HOME || path.join(app.getPath('home'), '.config'), 'autostart', 'twitchterino.desktop');
 const isOpenAtLogin = () => (isLinux ? fs.existsSync(autostartFile()) : app.getLoginItemSettings(LOGIN_ITEM).openAtLogin);
 function setOpenAtLogin(on) {
   if (!isLinux) return app.setLoginItemSettings({ ...LOGIN_ITEM, openAtLogin: on });
@@ -916,7 +940,7 @@ function setOpenAtLogin(on) {
   if (!on) return fs.rmSync(file, { force: true });
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const exe = process.env.APPIMAGE || process.execPath;
-  fs.writeFileSync(file, `[Desktop Entry]\nType=Application\nName=Kickterino\nExec="${exe}" --hidden\nIcon=kickterino\nX-GNOME-Autostart-enabled=true\n`);
+  fs.writeFileSync(file, `[Desktop Entry]\nType=Application\nName=Twitchterino\nExec="${exe}" --hidden\nIcon=twitchterino\nX-GNOME-Autostart-enabled=true\n`);
 }
 
 function showMain() {
@@ -938,10 +962,10 @@ function updateTray() {
   const gained = sumGained();
   const now = Date.now();
   const active = activeBonuses(now).filter((b) => b.endsAt).map((b) => `${b.name.replace('+15% ', '')} ${clock(b.endsAt - now)}`);
-  tray.setToolTip(`Kickterino — ${config.farming ? `${watchers.size} assistindo` : 'farm pausado'}${gained ? ` · +${gained} pts` : ''}`
+  tray.setToolTip(`Twitchterino — ${config.farming ? `${watchers.size} assistindo` : 'farm pausado'}${gained ? ` · +${gained} pts` : ''}`
     + (active.length ? `\nBônus ativo: ${active.join(' · ')}` : ''));
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Abrir Kickterino', click: showMain },
+    { label: 'Abrir Twitchterino', click: showMain },
     { label: 'Farmar pontos', type: 'checkbox', checked: config.farming, click: (item) => setFarming(item.checked) },
     { type: 'separator' },
     { label: 'Sair', click: quitApp },
@@ -975,7 +999,7 @@ function setupAutoUpdate() {
 
 ipcMain.handle('state:get', () => snapshot());
 ipcMain.handle('channels:add', async (_e, slug) => {
-  slug = String(slug || '').trim().toLowerCase().replace(/^https?:\/\/(www\.)?kick\.com\//, '').replace(/[^a-z0-9_-]/g, '');
+  slug = String(slug || '').trim().toLowerCase().replace(/^https?:\/\/(www\.)?twitch\.tv\//, '').replace(/[/?#].*$/, '').replace(/[^a-z0-9_]/g, '');
   if (slug && !config.channels.includes(slug)) { config.channels.push(slug); saveConfig(); poll(); }
   return snapshot();
 });
@@ -1017,7 +1041,7 @@ ipcMain.handle('report:save', async (_e, rect) => {
   const image = await mainWin.webContents.capturePage(r);
   const { canceled, filePath } = await dialog.showSaveDialog(mainWin, {
     title: 'Salvar resumo da semana',
-    defaultPath: path.join(app.getPath('pictures'), `kickterino-semana-${dayKey(Date.now())}.png`),
+    defaultPath: path.join(app.getPath('pictures'), `twitchterino-semana-${dayKey(Date.now())}.png`),
     filters: [{ name: 'Imagem PNG', extensions: ['png'] }],
   });
   if (canceled || !filePath) return null;
@@ -1037,7 +1061,7 @@ ipcMain.handle('bonusTarget:set', (_e, cost) => {
   return snapshot();
 });
 ipcMain.handle('limitTest:start', () => {
-  if (!loggedIn && !process.env.KICKTERINO_LIMIT_AUTOSTART) return snapshot(); // sem login a Kick não dá pontos: o teste não mediria nada
+  if (!loggedIn && !process.env.TWITCHTERINO_LIMIT_AUTOSTART) return snapshot(); // sem login a Twitch não dá pontos: o teste não mediria nada
   startLimitTest(); reconcileWatchers(); return snapshot(); });
 ipcMain.handle('limitTest:stop', () => { stopLimitTest(); reconcileWatchers(); return snapshot(); });
 ipcMain.handle('lowQuality:set', (_e, on) => {
@@ -1048,14 +1072,14 @@ ipcMain.handle('lowQuality:set', (_e, on) => {
 ipcMain.handle('refresh', async () => { await poll(); return snapshot(); });
 ipcMain.handle('login:show', async () => {
   apiWin.show(); apiWin.focus();
-  await loadApi(`${KICK}/login`);
+  await loadApi(`${TWITCH}/login`);
 });
 // Sair da conta: apaga cookies, cache e tudo que as páginas guardaram, inclusive o login do
-// Google, Apple ou Discord. A lista de canais e as preferências ficam.
+// Google, Amazon ou Apple. A lista de canais e as preferências ficam.
 ipcMain.handle('logout', async () => {
   const { response } = await dialog.showMessageBox(mainWin, {
     type: 'question', buttons: ['Sair da conta', 'Cancelar'], defaultId: 1, cancelId: 1,
-    title: 'Sair da conta', message: 'Sair da conta da Kick neste PC?',
+    title: 'Sair da conta', message: 'Sair da conta da Twitch neste PC?',
     detail: 'Os dados de login salvos no app serão apagados. Para farmar de novo, será preciso entrar outra vez.',
   });
   if (response !== 0) return snapshot();
@@ -1088,23 +1112,42 @@ ipcMain.handle('channel:show', (_e, slug) => {
   if (s) s.ageGate = false;
   send('status', snapshot());
 });
+// Envia pelo chat IRC da Twitch com o token da sessão: conecta, manda a mensagem e fecha.
 ipcMain.handle('chat:send', async (_e, { chatroomId, content }) => {
-  const { status: code, json } = await kickFetch(`/api/v2/messages/send/${chatroomId}`, {
-    method: 'POST', body: { content, type: 'message' },
-  });
-  return { ok: code >= 200 && code < 300, status: code, message: json && (json.message || (json.status && json.status.message)) };
+  const token = await sessionToken();
+  const channel = String(chatroomId || '');
+  const text = String(content || '').replace(/[\r\n]+/g, ' ').trim();
+  if (!token || !username) return { ok: false, status: 401, message: 'sem login' };
+  if (!/^[a-z0-9_]+$/.test(channel) || !text) return { ok: false, status: 400 };
+  const code = `new Promise((resolve) => {
+    const ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
+    const done = (ok, message) => { clearTimeout(timer); ws.close(); resolve({ ok, message }); };
+    const timer = setTimeout(() => done(false, 'sem resposta do chat'), 10000);
+    ws.onopen = () => { ws.send('PASS oauth:' + ${JSON.stringify(token)}); ws.send('NICK ' + ${JSON.stringify(username.toLowerCase())}); };
+    ws.onmessage = (e) => {
+      if (e.data.includes(':tmi.twitch.tv 001 ')) {
+        ws.send('PRIVMSG #' + ${JSON.stringify(channel)} + ' :' + ${JSON.stringify(text)});
+        setTimeout(() => done(true), 1000);
+      } else if (e.data.includes('NOTICE * :')) done(false, 'login do chat recusado');
+    };
+  })`;
+  try {
+    await withTimeout(apiReady, 20 * 1000);
+    const res = await withTimeout(apiWin.webContents.executeJavaScript(code, true), 15 * 1000);
+    return { ok: res.ok, status: res.ok ? 200 : 0, message: res.message };
+  } catch (e) { return { ok: false, status: 0, message: String(e.message || e) }; }
 });
 
 // Só uma instância: abrir o atalho de novo traz a janela existente para frente.
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', showMain);
-app.setAppUserModelId('com.vinniisaantos.kickterino');
+app.setAppUserModelId('com.vinniisaantos.twitchterino');
 
 app.whenReady().then(() => {
   loadConfig();
   setupSession();
   mainWin = new BrowserWindow({
-    width: 1100, height: 760, backgroundColor: '#1a1a1a', title: 'Kickterino',
+    width: 1100, height: 760, backgroundColor: '#1a1a1a', title: 'Twitchterino',
     show: !process.argv.includes('--hidden'), // ao iniciar com o Windows, abre direto na bandeja
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false },
@@ -1119,8 +1162,8 @@ app.whenReady().then(() => {
     if (!config.trayHintShown) {
       config.trayHintShown = true;
       saveConfig();
-      notify('O Kickterino continua farmando', isLinux
-        ? 'Ele fica na bandeja do sistema. Se o ícone não aparecer, abra o Kickterino de novo pelo menu de apps. Para sair de vez, use o botão Sair.'
+      notify('O Twitchterino continua farmando', isLinux
+        ? 'Ele fica na bandeja do sistema. Se o ícone não aparecer, abra o Twitchterino de novo pelo menu de apps. Para sair de vez, use o botão Sair.'
         : 'Ele fica na bandeja, perto do relógio. Para sair de vez: botão direito no ícone > Sair.', showMain);
     }
   });
@@ -1131,16 +1174,17 @@ app.whenReady().then(() => {
   createTray();
   syncKeepAwake();
   powerMonitor.on('resume', recoverAfterResume);
+  // Se o processo de GPU cai (driver resetou, outro programa pegou a placa), os vídeos de todas
+  // as lives param e não voltam sozinhos, e a Twitch para de contar pontos: reabre tudo igual.
+  app.on('child-process-gone', (_e, details) => { if (details.type === 'GPU') recoverAfterResume(); });
   setupAutoUpdate();
   createApiWindow();
   apiReady.then(poll).then(() => {
-    if (process.env.KICKTERINO_LIMIT_AUTOSTART) { startLimitTest(); reconcileWatchers(); }
+    if (process.env.TWITCHTERINO_LIMIT_AUTOSTART) { startLimitTest(); reconcileWatchers(); }
   });
   setInterval(poll, POLL_MS);
   setInterval(() => send('status', snapshot()), 15 * 1000);
   setInterval(() => { checkBonusEnding(); updateTray(); }, 30 * 1000);
-  setTimeout(syncPartners, 30 * 1000);
-  setInterval(syncPartners, 6 * 60 * 60 * 1000);
 });
 
 app.on('before-quit', () => { app.isQuitting = true; });

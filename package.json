@@ -1,12 +1,10 @@
 {
-  "name": "kickterino",
-  "productName": "Kickterino",
-  "version": "0.3.0",
-  "description": "Cliente multi-chat da Kick (estilo Chatterino) que mantém você assistindo várias lives para acumular pontos do canal.",
+  "name": "twitchterino",
+  "productName": "Twitchterino",
+  "version": "0.1.0",
+  "description": "Cliente multi-chat da Twitch (estilo Chatterino, adaptado do Twitchterino) que mantém você assistindo lives para acumular pontos do canal.",
   "author": "VinniiSaantos",
   "license": "MIT",
-  "homepage": "https://viinnisantoos.github.io/kickterino/",
-  "repository": "github:ViinniSantoos/kickterino",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -21,19 +19,13 @@
     "electron-builder": "26.18.0"
   },
   "build": {
-    "appId": "com.vinniisaantos.kickterino",
-    "productName": "Kickterino",
+    "appId": "com.vinniisaantos.twitchterino",
+    "productName": "Twitchterino",
     "directories": {
       "output": "dist",
       "buildResources": "build"
     },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "ViinniSantoos",
-        "repo": "kickterino"
-      }
-    ],
+    "publish": null,
     "files": [
       "main.js",
       "preload.js",
@@ -55,16 +47,16 @@
       "icon": "build/icon.png"
     },
     "nsis": {
-      "artifactName": "Kickterino-Setup.exe",
+      "artifactName": "Twitchterino-Setup.exe",
       "oneClick": true,
       "perMachine": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Kickterino",
+      "shortcutName": "Twitchterino",
       "runAfterFinish": true
     },
     "portable": {
-      "artifactName": "Kickterino-portatil.exe"
+      "artifactName": "Twitchterino-portatil.exe"
     },
     "linux": {
       "target": [
@@ -73,17 +65,17 @@
       ],
       "icon": "build/icon.png",
       "category": "Network",
-      "executableName": "kickterino",
-      "synopsis": "Chat e pontos da Kick para o PokeIdle",
+      "executableName": "twitchterino",
+      "synopsis": "Chat e pontos da Twitch para o PokeIdle",
       "maintainer": "VinniiSaantos <122901997+ViinniSantoos@users.noreply.github.com>",
       "syncDesktopName": true
     },
     "appImage": {
-      "artifactName": "Kickterino-linux.AppImage"
+      "artifactName": "Twitchterino-linux.AppImage"
     },
     "deb": {
-      "artifactName": "Kickterino-linux.deb"
+      "artifactName": "Twitchterino-linux.deb"
     }
   },
-  "desktopName": "kickterino.desktop"
+  "desktopName": "twitchterino.desktop"
 }
