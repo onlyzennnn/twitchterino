@@ -2,14 +2,15 @@
   "name": "twitchterino",
   "productName": "Twitchterino",
   "version": "0.1.0",
-  "description": "Cliente multi-chat da Twitch (estilo Chatterino, adaptado do Twitchterino) que mantém você assistindo lives para acumular pontos do canal.",
-  "author": "VinniiSaantos",
+  "description": "Cliente multi-chat da Twitch (estilo Chatterino, adaptado do Kickterino) que mantém você assistindo lives para acumular pontos do canal.",
+  "author": "onlyzennnn",
   "license": "MIT",
+  "repository": "github:onlyzennnn/twitchterino",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win",
-    "dist:linux": "electron-builder --linux"
+    "dist": "electron-builder --win --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
   },
   "dependencies": {
     "electron-updater": "^6.6.2"
@@ -19,13 +20,19 @@
     "electron-builder": "26.18.0"
   },
   "build": {
-    "appId": "com.vinniisaantos.twitchterino",
+    "appId": "com.onlyzennnn.twitchterino",
     "productName": "Twitchterino",
     "directories": {
       "output": "dist",
       "buildResources": "build"
     },
-    "publish": null,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "onlyzennnn",
+        "repo": "twitchterino"
+      }
+    ],
     "files": [
       "main.js",
       "preload.js",
@@ -67,7 +74,7 @@
       "category": "Network",
       "executableName": "twitchterino",
       "synopsis": "Chat e pontos da Twitch para o PokeIdle",
-      "maintainer": "VinniiSaantos <122901997+ViinniSantoos@users.noreply.github.com>",
+      "maintainer": "onlyzennnn <1506vinicius.fernando@gmail.com>",
       "syncDesktopName": true
     },
     "appImage": {

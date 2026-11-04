@@ -1165,7 +1165,7 @@ ipcMain.handle('chat:send', async (_e, { chatroomId, content }) => {
 // Só uma instância: abrir o atalho de novo traz a janela existente para frente.
 if (!app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', showMain);
-app.setAppUserModelId('com.vinniisaantos.twitchterino');
+app.setAppUserModelId('com.onlyzennnn.twitchterino');
 
 app.whenReady().then(() => {
   loadConfig();
