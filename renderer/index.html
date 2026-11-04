@@ -5,81 +5,130 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'">
   <title>Twitchterino</title>
   <link rel="stylesheet" href="style.css">
-  <link rel="stylesheet" href="features.css">
-  <link rel="stylesheet" href="theme.css">
 </head>
 <body>
-  <header id="toolbar">
-    <span class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg></span><span class="brand-name">Twitchterino</span>
-    <button id="btn-login" title="Abre a Twitch para você fazer login (uma vez só)">Login Twitch</button>
-    <button id="btn-logout" title="Apaga os dados de login salvos neste PC" hidden>Sair da conta</button>
-    <label class="toggle"><input type="checkbox" id="farming"> Farmar pontos</label>
-    <label class="toggle" title="Lives ocultas rodam em 160p, sem imagens: gasta bem menos memória e internet"><input type="checkbox" id="low-quality"> Modo leve (160p)</label>
-    <label title="Quantas lives tocam ao mesmo tempo. Na Kick só 2 contavam pontos; na Twitch, use o teste de limite do painel para conferir. As outras ficam na fila.">Lives ao mesmo tempo <input type="number" id="max-watchers" min="1" max="30"></label>
-    <label class="toggle" title="Ligado: as vagas vão para os canais mais perto do bônus escolhido e, quando um chega lá, passa para o próximo. Canais em que você é sub vêm primeiro enquanto estiverem ao vivo. Desligado: ficam só os primeiros canais da lista."><input type="checkbox" id="rotation"> Foco em bônus</label>
-    <label title="Qual bônus o foco deve buscar. Automático: todos chegam a 300, depois 500 e 1.000. Escolhendo um, as vagas juntam pontos até o custo dele nos canais mais perto, e só esse bônus avisa.">Bônus <select id="bonus-target">
-      <option value="0">Automático</option>
-      <option value="300">+15% XP (300)</option>
-      <option value="500">+15% Capture Boost (500)</option>
-      <option value="1000">+15% Secret Lure (1.000)</option>
-    </select></label>
-    <label class="toggle" id="autostart-label" title="Abre sozinho, direto na bandeja, quando o Windows liga"><input type="checkbox" id="autostart"> <span>Iniciar com o Windows</span></label>
-    <label class="toggle" title="Avisa quando um canal alcança 300, 500 ou 1.000 pontos"><input type="checkbox" id="notify-bonus"> Avisar bônus</label>
-    <button id="btn-refresh">Atualizar</button>
-    <span id="summary"></span>
-    <span id="memory" title="Memória total usada pelo Twitchterino"></span>
-    <button id="btn-panel" title="Painel de pontos">Pontos ▸</button>
-    <button id="btn-quit" title="Fecha o Twitchterino de vez (para o farm)" hidden>Sair</button>
+  <header id="header">
+    <div class="brand-wrap">
+      <span class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/></svg></span>
+      <b class="brand-name">Twitchterino</b>
+    </div>
+    <button id="btn-farm" class="farm-pill" title="Liga ou desliga o farm de pontos em todas as lives"><span class="switch"><i></i></span><span id="farm-label">Farm ligado</span></button>
+    <div id="stats">
+      <span><b id="st-live">0</b> ao vivo</span>
+      <span><b id="st-watching" class="accent">0</b> assistindo</span>
+      <span><b id="st-queued">0</b> na fila</span>
+      <span><b id="st-total">0</b> pts <span id="st-gained" class="accent"></span></span>
+      <span id="st-memory" title="Memória total usada pelo Twitchterino"></span>
+    </div>
+    <div class="hdr-actions">
+      <button id="btn-refresh" class="ghost">Atualizar</button>
+      <div class="account">
+        <button id="btn-account" class="ghost"><span id="account-avatar" class="mini-avatar" hidden></span><span id="account-name">Login Twitch</span></button>
+        <div id="account-menu" hidden><button id="btn-logout" title="Apaga os dados de login salvos neste PC">Sair da conta</button></div>
+      </div>
+    </div>
   </header>
 
-  <nav id="tabs"></nav>
-
-  <main>
-    <section id="chat-col">
-      <div id="chat-header">
-        <span id="chat-title"></span>
-        <span id="chat-actions">
-          <button id="btn-fav" title="Favoritar: o canal fica no começo das abas e você recebe um aviso quando ele entrar ao vivo">☆</button>
-          <button id="btn-show" title="Abre a live com vídeo e som">Abrir live</button>
-          <button id="btn-remove" title="Remover canal">✕</button>
-        </span>
+  <div id="columns">
+    <aside id="list">
+      <div class="list-top"><span class="area-title">Canais</span><span id="add-slot"><button id="btn-add" class="dashed" title="Adicionar canal">+ Adicionar</button></span></div>
+      <div id="list-scroll">
+        <div class="group" id="g-watching" hidden><div class="group-title"><span>Assistindo</span><span class="count"></span></div><div class="group-rows"></div></div>
+        <div class="group" id="g-queue" hidden><div class="group-title"><span>Na fila</span><span class="count"></span></div><div class="group-rows"></div></div>
+        <div class="group" id="g-offline" hidden><div class="group-title"><span>Offline</span><span class="count"></span></div><div class="group-rows"></div></div>
       </div>
-      <div id="messages"></div>
+    </aside>
+
+    <section id="chat">
+      <div id="chat-head">
+        <span id="sel-avatar" class="avatar big"></span>
+        <div class="sel-info">
+          <div class="sel-line"><b id="sel-name"></b><span id="sel-badge" class="status-badge"></span></div>
+          <span id="sel-text"></span>
+        </div>
+        <button id="btn-fav" class="soft" title="Favoritar: o canal fica no começo da lista e você recebe um aviso quando ele entrar ao vivo">☆ Favoritar</button>
+        <button id="btn-show" class="soft" title="Abre a live com vídeo e som">Abrir live</button>
+        <button id="btn-remove" class="soft quiet" title="Remover canal">✕</button>
+      </div>
+
+      <div id="chat-area">
+        <div id="messages" hidden></div>
+        <div id="empty" hidden>
+          <div class="empty-card">
+            <div class="empty-text"><b id="empty-title"></b><span id="empty-body"></span></div>
+            <div class="goal-box">
+              <div class="goal-top"><span id="goal-name"></span><span class="num"><b id="goal-pts"></b><span class="dim" id="goal-of"></span></span></div>
+              <div class="bar b6"><i id="goal-bar"></i></div>
+              <span class="goal-left"><span id="goal-verb">Faltam</span> <b id="goal-left" class="num"></b> <span id="goal-unit">pontos</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <form id="composer">
-        <button type="button" id="btn-points" title="Pontos do canal: abrir a loja de recompensas">
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="7" r="4.2"/><circle cx="7" cy="15" r="4.2"/><circle cx="17" cy="15" r="4.2"/></svg>
-          <span id="points-val">—</span>
-        </button>
-        <input id="input" autocomplete="off" placeholder="Enviar mensagem…">
+        <div class="points-wrap">
+          <button type="button" id="btn-points" title="Pontos do canal: abrir a loja de recompensas">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="7" r="4.2"/><circle cx="7" cy="15" r="4.2"/><circle cx="17" cy="15" r="4.2"/></svg>
+            <span id="points-val">—</span>
+          </button>
+        </div>
+        <input id="input" autocomplete="off">
       </form>
+
+      <div id="toasts"></div>
     </section>
 
-    <aside id="panel" hidden>
-      <h2>Bônus ativos</h2>
-      <div id="bonus-box"></div>
-      <div id="sleep-box" hidden><button id="btn-sleep" title="Mostra os canais com pontos para comprar bônus e abre as lojas uma de cada vez">🌙 Antes de dormir</button></div>
-      <h2>Pontos do canal</h2>
-      <table>
-        <thead><tr><th>Canal</th><th>Status</th><th>Pontos</th><th>Assistido</th></tr></thead>
-        <tbody id="panel-rows"></tbody>
-      </table>
-      <div id="limit-box">
-        <button id="btn-limit" title="Abre todas as lives ao vivo e mede quantas a Twitch conta; se não forem todas, testa números menores (~20 min por etapa) e ajusta o app para o que rende mais pontos">Descobrir limite de lives</button>
-        <div id="limit-info"></div>
+    <aside id="farm">
+      <div class="farm-scroll">
+        <div class="farm-block">
+          <span class="area-title">Bônus ativos</span>
+          <div id="bonus-box"></div>
+          <div id="purchases" hidden></div>
+        </div>
+
+        <div class="farm-block tight">
+          <span class="area-title pad">Farm</span>
+          <div class="setting" title="Quantas lives tocam ao mesmo tempo. Na Twitch só 2 ganham pontos: mais que isso gasta memória sem render mais pontos. As outras ficam na fila.">
+            <span>Lives ao mesmo tempo</span>
+            <div class="stepper"><button id="w-dec" aria-label="Menos lives">−</button><span id="w-val" class="num">2</span><button id="w-inc" aria-label="Mais lives">+</button></div>
+          </div>
+          <button type="button" class="toggle-row" id="t-lowQuality" title="Lives ocultas rodam em 160p, sem imagens: gasta bem menos memória e internet"><span>Modo leve (160p)</span><span class="switch"><i></i></span></button>
+          <button type="button" class="toggle-row" id="t-rotation" title="As vagas vão para os canais mais perto do bônus escolhido. Subs ao vivo vêm primeiro. Quando um canal entra ao vivo, ele ganha uma vaga por até 10 min para pegar a sequência de lives."><span>Foco em bônus</span><span class="switch"><i></i></span></button>
+          <div id="target-wrap" title="Qual bônus o foco deve buscar. Automático: todos chegam a 300, depois 500 e 1.000.">
+            <span class="label-sm">Bônus buscado</span>
+            <div class="segmented s4" id="target"><span class="seg-ind"></span>
+              <button data-v="0">Auto</button><button data-v="300">XP</button><button data-v="500">Capture</button><button data-v="1000">Lure</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="farm-block tight">
+          <span class="area-title pad">Avisos e sistema</span>
+          <button type="button" class="toggle-row" id="t-notifyBonus" title="Avisa quando um canal alcança 300, 500 ou 1.000 pontos"><span>Avisar bônus</span><span class="switch"><i></i></span></button>
+          <button type="button" class="toggle-row" id="t-notifyChat" title="Destaca no chat quando alguém escreve seu nome e quando aparece um sorteio"><span>Avisar menções e sorteios</span><span class="switch"><i></i></span></button>
+          <button type="button" class="toggle-row" id="t-sleepMode" title="Mostra o botão Antes de dormir: lista os canais com pontos e abre as lojas uma de cada vez"><span>Modo antes de dormir</span><span class="switch"><i></i></span></button>
+          <button type="button" class="toggle-row" id="t-autostart" title="Abre sozinho, direto na bandeja, quando o Windows liga"><span id="autostart-label">Iniciar com o Windows</span><span class="switch"><i></i></span></button>
+        </div>
+        <div id="limit-info" hidden></div>
       </div>
-      <div id="tools">
-        <button id="btn-report" title="Pontos, bônus comprados e tempo com bônus ativo nos últimos 7 dias">📊 Relatório da semana</button>
-        <label class="toggle" title="Destaca no chat quando alguém escreve seu nome e quando aparece um sorteio, e avisa se a janela estiver escondida"><input type="checkbox" id="notify-chat"> Avisar menções e sorteios</label>
-        <label class="toggle" title="Mostra o botão Antes de dormir no topo deste painel: ele lista os canais com pontos para bônus e abre as lojas uma de cada vez. Só abre quando você clica."><input type="checkbox" id="sleep-mode"> Modo antes de dormir</label>
+      <div class="farm-foot">
+        <button id="btn-sleep" class="soft wide" hidden title="Mostra os canais com pontos para comprar bônus e abre as lojas uma de cada vez"><span>Antes de dormir</span><span id="sleep-count" class="dim"></span></button>
+        <div class="foot-grid">
+          <button id="btn-report" class="soft" title="Pontos, bônus comprados e tempo com bônus ativo nos últimos 7 dias">Relatório</button>
+          <button id="btn-limit" class="soft" title="Abre todas as lives ao vivo e mede quantas a Twitch conta">Testar limite</button>
+        </div>
+        <button id="btn-quit" class="soft wide" title="Fecha o Twitchterino de vez (para o farm)" hidden>Sair</button>
       </div>
-      <p class="hint">A Twitch dá 10 pontos a cada 5 min por live, e o app clica sozinho no baú de +50 que aparece a cada ~15 min. Como o saldo é separado por canal, o padrão é 2 lives com foco em bônus: as vagas vão para quem está mais perto de 300 e, depois que todos chegam lá, de 500 e 1.000. Quando um canal entra ao vivo, ele ganha uma vaga por até 10 min (status SEQUÊNCIA) para pegar a sequência de lives da Twitch, que vale 300 a 450 pts. Canais em que você é sub rendem mais: têm prioridade e ficam até sair do ar, sem meta de bônus. Logo depois que a live abre, o status fica AQUECENDO até o primeiro ganho.</p>
     </aside>
-  </main>
+  </div>
 
   <div id="modal" hidden><div id="modal-card"></div></div>
-  <div id="toasts"></div>
-  <canvas id="confetti"></canvas>
+  <canvas id="confetti" hidden></canvas>
 
+  <script src="base.js"></script>
+  <script src="chat.js"></script>
+  <script src="farm.js"></script>
+  <script src="modals.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

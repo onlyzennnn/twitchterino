@@ -116,7 +116,7 @@ function setupSession() {
     const url = details.url;
     cb({
       cancel: BLOCKED_HOSTS.some((h) => url.includes(h))
-        || (HIDDEN_SKIP.has(details.resourceType) && isHiddenWatcher(details.webContents)),
+        || ((HIDDEN_SKIP.has(details.resourceType) || url.includes('ext-twitch.tv')) && isHiddenWatcher(details.webContents)),
     });
   });
 }
@@ -290,9 +290,14 @@ const CLAIM_BONUS = `if (window.__twitchterinoClaims == null) {
   }, 10 * 1000);
 }`;
 
+// Ninguém vê a página de uma live oculta, mas a Twitch segue recalculando layout ~25 vezes por
+// segundo. Em display:none o player continua tocando e a CPU do app cai quase pela metade.
+const HIDE_PAGE_CSS = 'body > * { display: none !important; }';
+
 // Na janela de cada live: força 160p enquanto ela está oculta, clica no baú de bônus e lê o
 // chat do websocket IRC que a própria página da Twitch abre, repassando as mensagens.
 function instrumentWatcher(slug, win) {
+  win.webContents.on('dom-ready', () => { if (!userOpened.has(win)) win.webContents.insertCSS(HIDE_PAGE_CSS).catch(() => {}); });
   const dbg = win.webContents.debugger;
   try { dbg.attach('1.3'); } catch { return; }
   const seen = new Set();
@@ -324,7 +329,8 @@ function instrumentWatcher(slug, win) {
   // Depois de cada carga da página (Page.addScriptToEvaluateOnNewDocument trava se chamado antes da navegação).
   win.webContents.on('did-finish-load', () => win.webContents.executeJavaScript(CLAIM_BONUS).catch(() => {}));
   dbg.sendCommand('Network.enable').catch(() => {});
-  dbg.sendCommand('Fetch.enable', { patterns: [{ urlPattern: '*.m3u8*', requestStage: 'Response' }] }).catch(() => {});
+  // Só a lista principal de qualidades: as listas de segmentos atualizam a cada ~2 s e não precisam passar por aqui.
+  dbg.sendCommand('Fetch.enable', { patterns: [{ urlPattern: '*usher.ttvnw.net*m3u8*', requestStage: 'Response' }] }).catch(() => {});
 }
 
 // Lives que a pessoa abriu para ver (com imagem, som e qualidade normal).
@@ -490,7 +496,7 @@ function checkBonusEnding() {
 }
 
 // Relatório dos últimos 7 dias: pontos por dia, compras e tempo com bônus ativo por período.
-const PERIODS = [['Madrugada', 0, 6], ['Dia', 6, 18], ['Noite', 18, 24]];
+const PERIODS = [['Madrugada', 0, 6], ['Manhã', 6, 12], ['Tarde', 12, 18], ['Noite', 18, 24]];
 function weeklyReport(now = Date.now()) {
   const from = now - 7 * DAY_MS;
   const days = [];
@@ -529,7 +535,7 @@ function weeklyReport(now = Date.now()) {
 
 // Status da live, saldo, follow e sub numa consulta só. GraphQL interno da Twitch: pode mudar sem aviso.
 const CHANNEL_QUERY = `query($login: String!) { user(login: $login) {
-  displayName stream { id viewersCount title }
+  displayName profileImageURL(width: 70) stream { id viewersCount title }
   channel { self { communityPoints { balance } } }
   self { follower { followedAt } subscriptionBenefit { id } }
 } }`;
@@ -553,6 +559,7 @@ async function refreshChannel(slug) {
     s.viewers = user.stream ? user.stream.viewersCount : 0;
     s.title = user.stream ? user.stream.title : '';
     s.displayName = user.displayName || slug;
+    s.avatar = user.profileImageURL || null;
     s.error = null;
   } catch (e) {
     s.error = String(e.message || e);
@@ -861,6 +868,7 @@ function snapshot() {
     sleepMode: config.sleepMode,
     favorites: config.favorites,
     username,
+    userAvatar,
     version: app.getVersion(),
     intro: config.lastSeenVersion === app.getVersion() ? null : (firstRun ? 'welcome' : 'news'),
     bonuses: activeBonuses(now),
@@ -870,7 +878,7 @@ function snapshot() {
       const s = status.get(slug) || {};
       const watchedMs = (s.watchedMs || 0) + (s.watchingSince ? now - s.watchingSince : 0);
       return {
-        slug, displayName: s.displayName || slug, live: !!s.live, viewers: s.viewers || 0,
+        slug, displayName: s.displayName || slug, avatar: s.avatar || null, live: !!s.live, viewers: s.viewers || 0,
         title: s.title || '', chatroomId: s.chatroomId || null, points: s.points ?? null,
         watching: watchers.has(slug), ageGate: !!s.ageGate, earning: earningState(slug, now),
         streakVisit: watchers.has(slug) && needsStreak(slug),
@@ -893,10 +901,12 @@ let pollStartedAt = 0;
 let loggedIn = false;
 // Nome da conta logada: o chat destaca quando alguém menciona você.
 let username = null;
+let userAvatar = null;
 async function fetchUsername() {
   try {
-    const { json } = await gql('query { currentUser { login } }');
+    const { json } = await gql('query { currentUser { login profileImageURL(width: 70) } }');
     const user = json && json.data && json.data.currentUser;
+    userAvatar = user ? user.profileImageURL || null : null;
     return user ? String(user.login) : null;
   } catch { return null; }
 }
@@ -1171,7 +1181,7 @@ app.whenReady().then(() => {
   loadConfig();
   setupSession();
   mainWin = new BrowserWindow({
-    width: 1100, height: 760, backgroundColor: '#1a1a1a', title: 'Twitchterino',
+    width: 1100, height: 720, minWidth: 980, minHeight: 560, backgroundColor: '#0e0f13', title: 'Twitchterino',
     show: !process.argv.includes('--hidden'), // ao iniciar com o Windows, abre direto na bandeja
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true, nodeIntegration: false },

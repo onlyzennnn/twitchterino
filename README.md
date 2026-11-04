@@ -22,6 +22,7 @@ O app é feito em Electron e não tem servidor próprio.
 
 - Cada live é a página real da Twitch, aberta numa janela invisível e sem som.
 - Uma janela oculta em `twitch.tv` consulta status e saldo pelo GraphQL da própria Twitch, usando a sessão da pessoa.
+- Nas lives ocultas, a página fica em `display: none` e as extensões da Twitch são bloqueadas: o player continua tocando, sem recalcular layout para ninguém ver.
 - O protocolo DevTools limita a live à menor qualidade e lê o chat da conexão IRC que a página da Twitch já abre.
 - Um script dentro de cada live procura o baú de bônus a cada 10 s e clica quando ele aparece.
 - A cada minuto, o app confere o estado dos canais e reorganiza as vagas.
@@ -33,7 +34,9 @@ Medições de 04/11/2026, numa conta comum:
 - **Só 2 lives ganham pontos ao mesmo tempo.** Com 6 lives abertas, 2 ganharam o +10 de assistir e o baú; as outras 4 ficaram 20 min sem ganhar nada. Alternar entre lives não aumenta o total, só muda em qual canal os pontos caem.
 - Cada live que conta rende +10 a cada 5 min e um baú de +50 a cada ~15 min, ou cerca de 320 pontos por hora.
 - O baú foi pego 7 vezes numa tarde, sem ninguém clicar.
-- Cada live oculta em 160p usa cerca de 300 MB de memória.
+- Com a página oculta em `display: none`, a Twitch continua pagando o +10 e o baú.
+- Com 2 lives e a janela aberta, o app usa cerca de 45% de um núcleo da CPU e 1,1 GB de memória (cerca de 300 MB por live). Antes das otimizações, eram 2 GB e até 185% de um núcleo.
+- Com o chat aberto a 5 mensagens por segundo, a janela gasta 1,6% de um núcleo e 3,2% na GPU. A interface anterior gastava 61% e 78%.
 - O painel tem um **teste de limite**, que conta quantas lives ganham pontos na sua conta e ajusta o número de vagas.
 
 A sequência de lives só paga a partir da 2ª live seguida assistida em cada canal, por isso o modo sequência ainda não foi confirmado com um pagamento real.

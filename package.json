@@ -1,7 +1,7 @@
 {
   "name": "twitchterino",
   "productName": "Twitchterino",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cliente multi-chat da Twitch (estilo Chatterino, adaptado do Kickterino) que mantém você assistindo lives para acumular pontos do canal.",
   "author": "onlyzennnn",
   "license": "MIT",
